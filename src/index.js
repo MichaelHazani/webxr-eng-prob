@@ -15,6 +15,8 @@ import {
   BufferGeometry,
   Vector3,
   Line,
+  SphereGeometry,
+  MeshNormalMaterial,
 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRButton } from "three/examples/jsm/webxr/VRButton.js";
@@ -32,6 +34,7 @@ const camera = new PerspectiveCamera(
 let planet;
 let controllerGrip1, controllerGrip2, controller1, controller2;
 let raycaster,
+  tempPoint,
   intersected = [];
 const tempMatrix = new Matrix4();
 
@@ -44,9 +47,10 @@ g.load(planetModel, (e) => {
   });
   planet = e.scene;
   planet.scale.setScalar(0.3);
+  planet.position.z += 10;
   scene.add(planet);
-  const box = new BoxHelper(e.scene, 0xffff00);
-  scene.add(box);
+  // const box = new BoxHelper(e.scene, 0xffff00);
+  // scene.add(box);
 });
 camera.position.z = 55;
 
@@ -66,17 +70,15 @@ renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
-function animate() {
+renderer.setAnimationLoop(() => {
   if (planet) {
-    planet.rotation.y += 0.01;
+    planet.rotation.y += 0.001;
   }
-  cleanIntersected();
 
   intersectObjects(controller1);
   intersectObjects(controller2);
-  requestAnimationFrame(animate);
   renderer.render(scene, camera);
-}
+});
 
 const setUpXRInput = () => {
   controller1 = renderer.xr.getController(0);
@@ -108,6 +110,7 @@ const setUpXRInput = () => {
 
   const line = new Line(geometry);
   line.name = "line";
+  line.raycast = false;
   line.scale.z = 5;
 
   controller1.add(line.clone());
@@ -117,37 +120,39 @@ const setUpXRInput = () => {
 };
 
 const onSelectEnd = (e) => {};
-const onSelectStart = (e) => {};
+const onSelectStart = (e) => {
+  console.log(tempPoint);
+  const cubeGeometry = new BoxGeometry(0.2, 0.2, 0.2);
+  const cubeMaterial = new MeshBasicMaterial({ color: 0x00ff00 });
+  const marker = new Mesh(cubeGeometry, cubeMaterial);
+  marker.position.copy(tempPoint);
+  scene.add(marker);
+  planet.attach(marker);
+};
+
+const s = new SphereGeometry(0.1, 20, 20);
+const sm = new MeshNormalMaterial();
+const sphere = new Mesh(s, sm);
+scene.add(sphere);
 
 // from https://github.com/mrdoob/three.js/blob/master/examples/webxr_vr_dragging.html
+const intersectObjects = (controller) => {
+  const intersections = getIntersections(controller);
+
+  if (intersections && intersections.length > 0) {
+    if (intersections[0].object.type == "Line") return;
+    sphere.position.copy(intersections[0].point);
+    tempPoint = intersections[0].point;
+  }
+};
+
 const getIntersections = (controller) => {
   tempMatrix.identity().extractRotation(controller.matrixWorld);
-
   raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
   raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
 
   if (planet == undefined) return;
-  return raycaster.intersectObjects(planet);
-};
-const intersectObjects = (controller) => {
-  // Do not highlight when already selected
-
-  if (controller.userData.selected !== undefined) return;
-
-  const line = controller.getObjectByName("line");
-  const intersections = getIntersections(controller);
-  if (intersections == undefined) return;
-  if (intersections.length > 0) {
-    const intersection = intersections[0];
-
-    const object = intersection.object;
-    object.material.emissive.r = 1;
-    intersected.push(object);
-
-    line.scale.z = intersection.distance;
-  } else {
-    line.scale.z = 5;
-  }
+  return raycaster.intersectObjects(planet.children, true);
 };
 
 const cleanIntersected = () => {
@@ -158,4 +163,3 @@ const cleanIntersected = () => {
 };
 
 setUpXRInput();
-animate();
