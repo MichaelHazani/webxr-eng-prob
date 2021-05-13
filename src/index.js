@@ -8,9 +8,18 @@ import {
   DirectionalLight,
   AmbientLight,
   MeshStandardMaterial,
+  Matrix4,
+  sRGBEncoding,
   BoxHelper,
+  Raycaster,
+  BufferGeometry,
+  Vector3,
+  Line,
 } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { VRButton } from "three/examples/jsm/webxr/VRButton.js";
+import { XRControllerModelFactory } from "three/examples/jsm/webxr/XRControllerModelFactory.js";
+
 const planetModel = require("./assets/models/planet/planet.glb");
 const scene = new Scene();
 const camera = new PerspectiveCamera(
@@ -21,6 +30,10 @@ const camera = new PerspectiveCamera(
 );
 
 let planet;
+let controllerGrip1, controllerGrip2, controller1, controller2;
+let raycaster,
+  intersected = [];
+const tempMatrix = new Matrix4();
 
 const g = new GLTFLoader();
 g.load(planetModel, (e) => {
@@ -30,6 +43,7 @@ g.load(planetModel, (e) => {
     }
   });
   planet = e.scene;
+  planet.scale.setScalar(0.3);
   scene.add(planet);
   const box = new BoxHelper(e.scene, 0xffff00);
   scene.add(box);
@@ -45,13 +59,103 @@ scene.add(dirLight);
 const renderer = new WebGLRenderer();
 renderer.setClearColor(0xffffff);
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.outputEncoding = sRGBEncoding;
+renderer.shadowMap.enabled = true;
+renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
+document.body.appendChild(VRButton.createButton(renderer));
 
 function animate() {
   if (planet) {
     planet.rotation.y += 0.01;
   }
+  cleanIntersected();
+
+  intersectObjects(controller1);
+  intersectObjects(controller2);
   requestAnimationFrame(animate);
   renderer.render(scene, camera);
 }
+
+const setUpXRInput = () => {
+  controller1 = renderer.xr.getController(0);
+  controller1.addEventListener("selectstart", onSelectStart);
+  controller1.addEventListener("selectend", onSelectEnd);
+  scene.add(controller1);
+
+  controller2 = renderer.xr.getController(1);
+  controller2.addEventListener("selectstart", onSelectStart);
+  controller2.addEventListener("selectend", onSelectEnd);
+  scene.add(controller2);
+  const controllerModelFactory = new XRControllerModelFactory();
+  controllerGrip1 = renderer.xr.getControllerGrip(0);
+  controllerGrip1.add(
+    controllerModelFactory.createControllerModel(controllerGrip1)
+  );
+  scene.add(controllerGrip1);
+
+  controllerGrip2 = renderer.xr.getControllerGrip(1);
+  controllerGrip2.add(
+    controllerModelFactory.createControllerModel(controllerGrip2)
+  );
+  scene.add(controllerGrip2);
+
+  const geometry = new BufferGeometry().setFromPoints([
+    new Vector3(0, 0, 0),
+    new Vector3(0, 0, -1),
+  ]);
+
+  const line = new Line(geometry);
+  line.name = "line";
+  line.scale.z = 5;
+
+  controller1.add(line.clone());
+  controller2.add(line.clone());
+
+  raycaster = new Raycaster();
+};
+
+const onSelectEnd = (e) => {};
+const onSelectStart = (e) => {};
+
+// from https://github.com/mrdoob/three.js/blob/master/examples/webxr_vr_dragging.html
+const getIntersections = (controller) => {
+  tempMatrix.identity().extractRotation(controller.matrixWorld);
+
+  raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+  raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+
+  if (planet == undefined) return;
+  return raycaster.intersectObjects(planet);
+};
+const intersectObjects = (controller) => {
+  // Do not highlight when already selected
+
+  if (controller.userData.selected !== undefined) return;
+
+  const line = controller.getObjectByName("line");
+  const intersections = getIntersections(controller);
+  if (intersections == undefined) return;
+  if (intersections.length > 0) {
+    const intersection = intersections[0];
+
+    const object = intersection.object;
+    object.material.emissive.r = 1;
+    intersected.push(object);
+
+    line.scale.z = intersection.distance;
+  } else {
+    line.scale.z = 5;
+  }
+};
+
+const cleanIntersected = () => {
+  while (intersected.length) {
+    const object = intersected.pop();
+    object.material.emissive.r = 0;
+  }
+};
+
+setUpXRInput();
 animate();
